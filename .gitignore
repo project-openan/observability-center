@@ -1,2 +1,5 @@
 # 模拟数据集不入库（npm run build:plugin 按需生成，部署时单独下发）
 dist-plugin/mock-collab-tasks.json
+
+# 依赖与构建中间产物
+node_modules/
