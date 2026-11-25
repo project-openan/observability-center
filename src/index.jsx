@@ -342,7 +342,8 @@ function StatusPill({ status }) {
 }
 
 function KindBadge({ kind }) {
-    return <span className={`obs-kind obs-kind-${kind}`}>{SPAN_KIND_LABELS[kind] || 'S'}</span>;
+    // 类名统一小写以命中 CSS（.obs-kind-client 等）；未知 kind 回退首字母
+    return <span className={`obs-kind obs-kind-${(kind || 'INTERNAL').toLowerCase()}`}>{SPAN_KIND_LABELS[kind] || (kind || '?').charAt(0)}</span>;
 }
 
 function SummaryChips({ tasks }) {
@@ -838,6 +839,13 @@ function SpanTree({ task, onSelectSpan, onSelectLog, sel }) {
     const [openSpans, setOpenSpans] = useState({});
     const { roots, children } = buildSpanTree(spans);
 
+    // 统计条 + 日志一键收展（瀑布图上方）
+    const logSpans = spans.filter((s) => (logsBySpan.get(s.spanID) || []).length > 0);
+    const allOpen = logSpans.length > 0 && logSpans.every((s) => openSpans[s.spanID] ?? true);
+    const errCount = spans.filter((s) => s.status === 'error').length;
+    const svcCount = new Set(spans.map((s) => s.service)).size;
+    const toggleAllLogs = () => setOpenSpans(allOpen ? Object.fromEntries(logSpans.map((s) => [s.spanID, false])) : {});
+
     const renderRow = (s, depth) => {
         const kids = children.get(s.spanID) || [];
         const logsFor = logsBySpan.get(s.spanID) || [];
@@ -915,13 +923,52 @@ function SpanTree({ task, onSelectSpan, onSelectLog, sel }) {
         );
     };
 
-    if (!roots.length) return <span className="obs-sig-none">本任务无 Span 数据</span>;
-    return <div className="obs-tree">{roots.map((r) => renderRow(r, 0))}</div>;
+    const statsRow = (
+        <div className="obs-chips obs-trace-stats">
+            <div className="obs-chip">
+                <span className="obs-chip-value">{spans.length}</span>
+                <span className="obs-chip-label">Span 总数</span>
+            </div>
+            <div className="obs-chip">
+                <span className="obs-chip-value" style={errCount > 0 ? { color: '#dc2626' } : undefined}>{errCount}</span>
+                <span className="obs-chip-label">错误 Span</span>
+            </div>
+            <div className="obs-chip">
+                <span className="obs-chip-value">{svcCount}</span>
+                <span className="obs-chip-label">协作智能体</span>
+            </div>
+            {logs.length > 0 && (
+                <button
+                    type="button"
+                    className="obs-btn obs-trace-logtoggle"
+                    onClick={toggleAllLogs}
+                    title={allOpen ? '一键收起所有 Span 挂接的日志' : '一键展开所有 Span 挂接的日志'}
+                    style={{ marginLeft: 'auto', alignSelf: 'center' }}
+                >
+                    {allOpen ? '全部收起日志' : '全部展开日志'}
+                </button>
+            )}
+        </div>
+    );
+    return (
+        <>
+            {statsRow}
+            {roots.length
+                ? <div className="obs-tree">{roots.map((r) => renderRow(r, 0))}</div>
+                : <span className="obs-sig-none">本任务无 Span 数据</span>}
+        </>
+    );
 }
 
 /** 日志列表（按信号类别过滤：message / workflow / agent）。 */
 function LogList({ logs, category, onSelect, sel }) {
-    const rows = (logs || []).filter((l) => (l.category || 'message') === category);
+    // 分类映射：workflow 组收编 step、agent 组收编 substep，未知类别兜底进 workflow 组，保证每条日志必归一组
+    const rows = (logs || []).filter((l) => {
+        const cat = l.category || 'message';
+        if (category === 'message') return cat === 'message';
+        if (category === 'agent') return cat === 'agent' || cat === 'substep';
+        return cat === 'workflow' || cat === 'step' || !(cat === 'message' || cat === 'agent' || cat === 'substep');
+    });
     return (
         <div className="obs-logs">
             {rows.length ? rows.map((log, i) => (
@@ -1074,6 +1121,12 @@ const LOG_TITLES = {
 function AttrInspector({ sel }) {
     const attrs = sel?.attrs || {};
     const keys = Object.keys(attrs).sort();
+    // Span 公共字段摘要（SigNoz 式）：仅当选中的是 Span 时显示
+    const spanRef = sel?.kind === 'span' ? sel.spanRef : null;
+    const kindLabel = spanRef
+        ? ({ INTERNAL: 'Internal', CLIENT: 'Client', SERVER: 'Server', PRODUCER: 'Provider', CONSUMER: 'Consumer' })[spanRef.kind] || spanRef.kind || 'Internal'
+        : null;
+    const startAbs = spanRef && sel.traceStartISO ? new Date(Date.parse(sel.traceStartISO) + (spanRef.startOffsetMs || 0)) : null;
     return (
         <div className="obs-panel obs-attrinspector">
             <div className="obs-prom-panel-head">
@@ -1085,6 +1138,34 @@ function AttrInspector({ sel }) {
                 </div>
                 {sel?.id && <IdChip id={sel.id} prefix={sel.kind === 'span' ? 'spanID' : 'log'} tone={sel.kind === 'span' ? 'indigo' : 'blue'} />}
             </div>
+            {spanRef && (
+                <div className="obs-spanmeta">
+                    <div className="obs-spanmeta-item">
+                        <span className="obs-spanmeta-k">本span用时</span>
+                        <span className="obs-spanmeta-v">{fmtMs(spanRef.durationMs)}</span>
+                    </div>
+                    <div className="obs-spanmeta-item">
+                        <span className="obs-spanmeta-k">总用时占比</span>
+                        <span className="obs-spanmeta-v">
+                            {spanRef.durationMs == null ? '—' : `${Math.round((spanRef.durationMs / (sel.totalMs || 1)) * 100)}%`}
+                        </span>
+                    </div>
+                    <div className="obs-spanmeta-item">
+                        <span className="obs-spanmeta-k">执行时刻</span>
+                        <span className="obs-spanmeta-v">
+                            {startAbs ? `${fmtTime(startAbs)}（+${spanRef.startOffsetMs || 0} ms）` : `+${spanRef.startOffsetMs || 0} ms`}
+                        </span>
+                    </div>
+                    <div className="obs-spanmeta-item">
+                        <span className="obs-spanmeta-k">类型</span>
+                        <span className="obs-spanmeta-v"><KindBadge kind={spanRef.kind} />{kindLabel}</span>
+                    </div>
+                    <div className="obs-spanmeta-item">
+                        <span className="obs-spanmeta-k">状态</span>
+                        <span className="obs-spanmeta-v"><StatusPill status={spanRef.status} /></span>
+                    </div>
+                </div>
+            )}
             {sel && keys.length > 0 && (
                 <table className="obs-ops-table obs-span-attrtable">
                     <thead><tr><th>属性</th><th>值</th></tr></thead>
@@ -1113,6 +1194,8 @@ function TraceContent({ task }) {
         id: s.spanID,
         attrs: s.tags || {},
         spanRef: s,
+        totalMs: Math.max(task.durationMs, 1),
+        traceStartISO: task.startedAt,
     });
     const selLog = (l) => setSel({
         kind: 'log',
