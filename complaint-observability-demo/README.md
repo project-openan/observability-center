@@ -31,7 +31,7 @@
 
 ### 离线运行
 
-首次运行前需要把 Workflow Engine 当前源码安装到本地 Maven 仓库。该版本提供 Demo 使用的 `ExecutePsop.Builder.observability(...)`；版本和提交记录见 `sdk-lock.json`。
+首次运行前需要将锁定的 Observability SDK 和 Workflow Engine 安装到本地 Maven 仓库。`bootstrap.ps1` 按 `sdk-lock.json` 下载并依次构建两者；Workflow Engine 暂时锁定到 [PR #109](https://github.com/project-openan/workflow-engine-sdk-java/pull/109) 的 fork 提交。
 
 ```powershell
 Set-Location <observability-center-clone>\complaint-observability-demo

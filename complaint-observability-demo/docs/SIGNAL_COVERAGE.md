@@ -24,20 +24,24 @@ WAIMO 发往 Transport、Transport 发往 OMC 的 HTTP 请求都传递 `tracepar
 
 ### Metric
 
+本表按最新 SDK 的维度定义整理；短生命周期 Demo 的指标由 Collector 汇聚，计数值按进程和时间序列观察，不应当作单个 run 的唯一标识。
+
 下表的“Prometheus 名称”是实际查询名。Histogram 会额外生成 `_bucket`、`_count`、`_sum` 三条时间序列。
 
 | 逻辑指标 | Prometheus 名称 | 覆盖情况 | 主要维度 |
 | --- | --- | --- | --- |
 | workflow 次数 | `gen_ai_agent_a2at_workflow_count_total` | WAIMO、Transport 的成功和失败工作流 | `workflow_type`、`workflow_status`、`service_name` |
 | workflow 耗时 | `gen_ai_agent_a2at_workflow_duration_milliseconds_{bucket,count,sum}` | 同上 | `workflow_type`、`workflow_status`、`service_name` |
-| step 耗时 | `gen_ai_agent_a2at_step_duration_milliseconds_{bucket,count,sum}` | 所有实际执行的 PSOP step | `workflow_step`、`gen_ai_agent_name`、`service_name` |
-| Task-T 次数 | `gen_ai_agent_a2at_task_count_total` | 工作流任务与区域诊断/修复子任务 | `task_type`、`task_object`、`service_name` |
-| Task-T 耗时 | `gen_ai_agent_a2at_task_duration_milliseconds_{bucket,count,sum}` | 同上 | `task_type`、`task_object`、`service_name` |
-| Agent 子步骤耗时 | `gen_ai_agent_a2at_substep_duration_milliseconds_{bucket,count,sum}` | 每一次 MockAgent 任务 | `gen_ai_agent_name`、`substep_name`、`service_name` |
+| step 耗时 | `gen_ai_agent_a2at_step_duration_milliseconds_{bucket,count,sum}` | 所有实际执行的 PSOP step | `gen_ai_agent_a2at_workflow_step_status`、`gen_ai_agent_name`、`service_name` |
+| step 次数 | `gen_ai_agent_a2at_step_count_total` | 每个实际执行的 PSOP step | `workflow_step_status`、`gen_ai_agent_name`、`service_name` |
+| substep 次数 | `gen_ai_agent_a2at_substep_count_total` | Agent 实际执行的子步骤 | `substep_status`、`gen_ai_agent_name`、`service_name` |
+| Task-T 次数 | `gen_ai_agent_a2at_task_count_total` | 工作流任务与区域诊断/修复子任务 | `task_type`、`task_object`、`task_status`、`service_name` |
+| Task-T 耗时 | `gen_ai_agent_a2at_task_duration_milliseconds_{bucket,count,sum}` | 同上 | `task_type`、`task_object`、`task_status`、`service_name` |
+| Agent 子步骤耗时 | `gen_ai_agent_a2at_substep_duration_milliseconds_{bucket,count,sum}` | 每一次 MockAgent 任务 | `gen_ai_agent_name`、`gen_ai_agent_a2at_substep_status`、`service_name` |
 | A2A 客户端调用耗时 | `gen_ai_client_operation_duration_seconds_{bucket,count,sum}` | 跨 JVM 的 A2A `SendMessage` 调用 | `operation_name`、`service_name` |
-| 授权预校验次数 | `gen_ai_agent_a2at_authorization_preauthorize_count_total` | 网络操作授权 | `authorization_policy_operation_type`、`service_name` |
-| 授权预校验耗时 | `gen_ai_agent_a2at_authorization_preauthorize_duration_milliseconds_{bucket,count,sum}` | 网络操作授权 | `authorization_policy_operation_type`、`service_name` |
-| 通知次数 | `gen_ai_agent_a2at_notification_count_total` | 根因、修复方案、修复结果、验证结果上报 | `notification_topic`、`service_name` |
+| 授权预校验次数 | `gen_ai_agent_a2at_authorization_preauthorize_count_total` | 网络操作授权 | `authorization_policy_operation_type`、`authorization_result`、`service_name` |
+| 授权预校验耗时 | `gen_ai_agent_a2at_authorization_preauthorize_duration_milliseconds_{bucket,count,sum}` | 网络操作授权 | `authorization_policy_operation_type`、`authorization_result`、`service_name` |
+| 通知次数 | `gen_ai_agent_a2at_notification_count_total` | 根因、修复方案、修复结果、验证结果上报 | `notification_topic`、`notification_result`、`service_name` |
 
 ### Log
 
@@ -59,14 +63,9 @@ OpenSearch 索引 `a2at-logs-v2` 中当前覆盖三类日志：
 | 未覆盖信号 | 原因 | 何时补充 |
 | --- | --- | --- |
 | `gen_ai_agent_a2a_streaming_duration_seconds_{bucket,count,sum}` | 当前 A2A 交互是同步 `SendMessage`，没有流式任务 | 引入 `SendStreamingMessage` 或订阅任务状态时 |
-| `gen_ai_agent_a2at_negotiation_rounds_{bucket,count,sum}` | 故事线无多 Agent 协商轮次 | 需要区域资源或修复方案协商时 |
-| `gen_ai_agent_a2at_negotiation_count_total` | 同上 | 同上 |
-| `gen_ai_agent_a2at_authorization_execute_count_total` | 当前只模拟预校验与拒绝，不单独记录授权执行 | 把“授权通过后执行”的动作建模为独立授权执行阶段时 |
-| `gen_ai_client_token_usage_total` | MockAgent 不调用 LLM | 接入真实模型调用时 |
-| `a2at.substep.<name>` span 与 Agent 生命周期日志 | 当前只为子步骤记录 metric，未创建独立 Agent 子步骤 span | 需要从 Trace 逐个展开 Agent 内部子步骤时 |
-| `notification-t`、`authorization-t` 专用 Span/Log | 当前把通知和预校验作为指标记录，Task-T 调用 span 仍标记为 `task-t` | 需要审计通知投递、授权阶段细节时 |
+| `gen_ai_client_inference_usage_input_tokens_total` / `gen_ai_client_inference_usage_output_tokens_total` | MockAgent 不调用 LLM，也没有真实 token 用量 | 接入真实模型调用时 |
 
-因此，当前 demo 已覆盖 workflow、step、Task-T、A2A 时延、通知计数、授权预校验和三类日志；它不覆盖流式调用、协商、真实 LLM token 使用和独立 Agent 内部 span。
+因此，当前 demo 已覆盖 workflow、step、Task-T、A2A 时延、通知计数、授权预校验和三类日志；它不覆盖真实 LLM token 使用；通知和授权行为使用固定的模拟结果。
 
 ## 查询全部已入库信号
 

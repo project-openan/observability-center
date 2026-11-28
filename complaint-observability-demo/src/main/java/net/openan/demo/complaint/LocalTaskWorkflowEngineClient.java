@@ -75,9 +75,14 @@ final class LocalTaskWorkflowEngineClient implements WorkflowEngineClient {
         Map<String, Object> attributes = Map.of("gen_ai.agent.name", localAgentName, "substep.name", skill, "substep.status", "completed");
         try (ObservationSpan substep = observe.trace("a2at.substep." + spanSegment(skill), SignalKind.INTERNAL, attributes)) {
             observe.log("gen_ai.agent.a2at.substep", LogSeverity.INFO, "Local agent substep completed: " + skill,
-                    Map.of("gen_ai.agent.name", localAgentName, "substep.name", skill, "substep.status", "completed", "workflow.step", step), substep);
-            observe.metric("substep.duration", (System.nanoTime() - started) / 1_000_000.0,
-                    Map.of("gen_ai.agent.name", localAgentName, "substep.name", skill));
+                    Map.of("gen_ai.agent.name", localAgentName, "substep.name", skill, "substep.status", "completed", "workflow.step.name", step), substep);
+            Map<String, Object> metricAttributes = Map.of("gen_ai.agent.name", localAgentName, "substep.status", "success");
+            observe.metric("substep.duration", (System.nanoTime() - started) / 1_000_000.0, metricAttributes);
+            observe.metric("substep.count", 1, metricAttributes);
+            // These PSOP skills model a successful notification inside the local mock agent.
+            if (skill.contains("Notification") || skill.equals("Restoration Result Reply") || skill.equals("Root Cause Summarization")) {
+                observe.metric("notification.count", 1, Map.of("notification.topic", MockAgentRouter.notificationTopic(skill), "notification.result", "sent"));
+            }
             substep.ok();
             return CompletableFuture.completedFuture(SendMessageResult.builder().taskState("TASK_STATE_COMPLETED").text("Local substep completed: " + skill).build());
         }

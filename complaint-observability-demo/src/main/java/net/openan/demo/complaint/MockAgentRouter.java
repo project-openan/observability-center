@@ -200,14 +200,29 @@ final class MockAgentRouter {
                             null,
                             null);
                 }
-                observe.metric(
-                        "task.duration",
-                        (System.nanoTime() - started) / 1_000_000.0,
-                        Map.of("task.type", skill, "task.object", step));
-                observe.metric(
-                        "substep.duration",
-                        (System.nanoTime() - started) / 1_000_000.0,
-                        Map.of("gen_ai.agent.name", agentName, "substep.name", skill));
+                boolean success = result.getFailureCode() == null;
+                String taskStatus = success ? "completed" : "failed";
+                Map<String, Object> taskMetric = Map.of("task.type", skill, "task.object", step, "task.status", taskStatus);
+                if (isTaskT(metadata)) {
+                    observe.metric("task.duration", (System.nanoTime() - started) / 1_000_000.0, taskMetric);
+                    observe.metric("task.count", 1, taskMetric);
+                }
+                Map<String, Object> substepMetric = Map.of("gen_ai.agent.name", agentName, "substep.status", success ? "success" : "failed");
+                observe.metric("substep.duration", (System.nanoTime() - started) / 1_000_000.0, substepMetric);
+                observe.metric("substep.count", 1, substepMetric);
+                if (skill.equals("Network Operation Authorization") || skill.equals("Network Operation Authorization Request")) {
+                    String authorizationResult = success ? "allowed" : "authorization.denied".equals(result.getFailureCode()) ? "denied" : "error";
+                    Map<String, Object> authMetric = Map.of("authorization.policy.operation.type", "tunnel-optimization", "authorization.result", authorizationResult);
+                    if (skill.equals("Network Operation Authorization")) {
+                        observe.metric("authorization.preauthorize.count", 1, authMetric);
+                        observe.metric("authorization.preauthorize.duration", (System.nanoTime() - started) / 1_000_000.0, authMetric);
+                    } else {
+                        observe.metric("authorization.execute.count", 1, authMetric);
+                    }
+                }
+                if (skill.contains("Notification") || skill.equals("Restoration Result Reply") || skill.equals("Root Cause Summarization")) {
+                    observe.metric("notification.count", 1, Map.of("notification.topic", notificationTopic(skill), "notification.result", success ? "sent" : "failed"));
+                }
                 return result;
             }
 
@@ -271,22 +286,6 @@ final class MockAgentRouter {
                 && skill.equals("Leased-Line Complaint Diagnosis")) {
             return transportWorkflow.execute(content);
         }
-        if (skill.equals("Network Operation Authorization")) {
-            observe.metric(
-                    "authorization.preauthorize.count",
-                    1,
-                    Map.of("authorization.policy.operation.type", "tunnel-optimization"));
-            observe.metric(
-                    "authorization.preauthorize.duration",
-                    (System.nanoTime() - started) / 1_000_000.0,
-                    Map.of("authorization.policy.operation.type", "tunnel-optimization"));
-        }
-    if (skill.equals("Network Operation Authorization Request")) {
-      observe.metric(
-          "authorization.execute.count",
-          1,
-          Map.of("authorization.policy.operation.type", "tunnel-optimization"));
-        }
     if ("authorization-denied".equals(caseName)
         && skill.equals("Network Operation Authorization Request")) {
       return failure(
@@ -298,12 +297,6 @@ final class MockAgentRouter {
           "authorization.denied",
           "Network operation authorization denied");
     }
-    if (skill.contains("Notification")
-        || skill.equals("Restoration Result Reply")
-                || skill.equals("Root Cause Summarization")) {
-            observe.metric(
-          "notification.count", 1, Map.of("notification.topic", notificationTopic(skill)));
-        }
         if ("authorization-denied".equals(caseName) && skill.contains("Complaint Handling Dispatch")) {
             return processRestorationDenied(agentName, step, skill, runId, parent, attributes, started);
         }
@@ -739,7 +732,8 @@ final class MockAgentRouter {
               "task.type",
               "Leased-Line Fault Locating and Restoration",
               "task.object",
-              String.valueOf(parentAttributes.getOrDefault("task.object", "nested"))));
+              String.valueOf(parentAttributes.getOrDefault("task.object", "nested")),
+              "task.status", denied ? "failed" : "completed"));
             return result;
         }
     }
@@ -824,7 +818,7 @@ final class MockAgentRouter {
         }
     }
 
-    private static String notificationTopic(String skill) {
+    static String notificationTopic(String skill) {
         return switch (skill) {
             case "Root Cause Summarization" -> "root-cause.reported";
             case "Restoration Plan Notification" -> "restoration-plan.reported";

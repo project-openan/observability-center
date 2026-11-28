@@ -1,9 +1,9 @@
 {
   "workflow-engine-sdk-java": {
-    "repository": "https://github.com/project-openan/workflow-engine-sdk-java.git",
-    "commit": "9691bbc102dc39d5214103886fa85ea8d136bee6",
+    "repository": "https://github.com/cnafan/workflow-engine-sdk-java.git",
+    "commit": "0783e6f403346a894489921c88921d5c841ea8e9",
     "mavenCoordinate": "net.openan.workflow.sdk:workflow-engine:0.1.0-SNAPSHOT",
-    "note": "Installed locally because the released 0.1.1 artifact does not expose the observability builder used by this demo."
+    "note": "Temporary fork commit from project-openan/workflow-engine-sdk-java#109; switch to the upstream merged commit after the PR is merged."
   },
   "a2a-t-sdk-java": {
     "repository": "https://github.com/project-openan/a2a-t-sdk-java.git",
@@ -25,9 +25,9 @@
   },
   "observability-sdk-java": {
     "repository": "https://github.com/project-openan/observability-sdk-java.git",
-    "commit": "29c3e3af207f9b81e48b8cddd5174446e2bc4ef8",
+    "commit": "a5d570cdcc9292c30449d97879417d703e85d7ce",
     "mavenCoordinate": "net.openan:observability-sdk:0.1.0-SNAPSHOT",
-    "note": "Use the sibling checkout or install the intended SDK commit into the local Maven repository."
+    "note": "Build and install this SDK commit before running the demo; its metric and step attribute definitions are required."
   },
   "scenario": {
     "source": "https://github.com/project-openan/observability-sdk-java/pull/29",

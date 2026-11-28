@@ -333,6 +333,21 @@ catch {
 }
 
 try {
+    # Resolve this run from its business log before selecting the trace. The most recent
+    # workflow may belong to a different run (including a different test case).
+    $traceLookup = @{
+        size = 10
+        _source = @('traceId')
+        query = @{ bool = @{ should = @(
+            @{ term = @{ 'attributes.run_id.keyword' = $RunId } },
+            @{ term = @{ 'attributes.run_id' = $RunId } }
+        ); minimum_should_match = 1 } }
+    } | ConvertTo-Json -Depth 10
+    $runLogs = Wait-ForStorageResult -TimeoutSeconds $QueryTimeoutSeconds -QueryAction {
+        Invoke-RestMethod -Uri 'http://127.0.0.1:19200/a2at-logs-v2/_search' -Method Post -ContentType 'application/json' -Body $traceLookup
+    } -Predicate { param($response) @($response.hits.hits | Where-Object { $_._source.traceId }).Count -gt 0 }
+    $runTraceIds = @($runLogs.response.hits.hits | ForEach-Object { [string]$_._source.traceId } | Where-Object { $_ } | Sort-Object -Unique)
+    if ($runTraceIds.Count -ne 1) { throw "Expected one trace ID for run $RunId, found $($runTraceIds.Count)" }
     $traceService = [uri]::EscapeDataString($ServiceName)
     $traceStart = [uri]::EscapeDataString([DateTimeOffset]::UtcNow.AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ssZ'))
     $traceEnd = [uri]::EscapeDataString([DateTimeOffset]::UtcNow.AddDays(1).ToString('yyyy-MM-ddTHH:mm:ssZ'))
@@ -352,7 +367,7 @@ try {
     }
     if ($traceFound) {
         $workflowSummary = @($traceResult.response.summaries |
-                Where-Object { $_.rootOperationName -eq 'a2at.workflow' } |
+                Where-Object { $_.rootOperationName -eq 'a2at.workflow' -and $_.traceId -eq $runTraceIds[0] } |
                 Sort-Object { [Int64]$_.maxStartTimeUnixNano } -Descending |
                 Select-Object -First 1)
         if ($workflowSummary.Count -eq 0) {

@@ -61,7 +61,10 @@ function Sync-LockedRepository {
     }
 }
 
- $workflowRoot = Join-Path $vendorRoot 'workflow-engine-sdk-java'
+$observabilityRoot = Join-Path $vendorRoot 'observability-sdk-java'
+Sync-LockedRepository $observabilityRoot $lock.'observability-sdk-java'.repository $lock.'observability-sdk-java'.commit
+
+$workflowRoot = Join-Path $vendorRoot 'workflow-engine-sdk-java'
 Sync-LockedRepository $workflowRoot $lock.'workflow-engine-sdk-java'.repository $lock.'workflow-engine-sdk-java'.commit
 
 $a2atRoot = Join-Path $vendorRoot 'a2a-t-sdk-java'
@@ -69,6 +72,10 @@ Sync-LockedRepository $a2atRoot $lock.'a2a-t-sdk-java'.repository $lock.'a2a-t-s
 
 $mockagentRoot = Join-Path $vendorRoot 'openan-demo'
 Sync-LockedRepository $mockagentRoot $lock.'openan-demo-mockagent'.repository $lock.'openan-demo-mockagent'.commit
+
+Set-Location $observabilityRoot
+& mvn -B -ntp install '-DskipTests' '-Dcheckstyle.skip=true' '-Dmaven.javadoc.skip=true' '-Dmaven.source.skip=true'
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Set-Location $workflowRoot
 & mvn -B -ntp install '-DskipTests' '-Dcheckstyle.skip=true' '-Dmaven.javadoc.skip=true' '-Dmaven.source.skip=true'
