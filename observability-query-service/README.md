@@ -53,7 +53,13 @@ pip install -e observability-query-service
 observability-query-service
 ```
 
-默认读取仓库根目录的 `dist-plugin/mock-collab-tasks.json`（由前端 `npm run build:plugin` 生成）并在 `8787` 端口提供接口。可通过 `PORT` 环境变量调整端口。
+默认监听 `127.0.0.1:8787`，并读取 `complaint-observability-demo/artifacts` 中的 Demo 运行报告。先运行 Demo 并保留报告，列表和详情才能找到对应运行；仅有存储数据时不会自动发现运行，报告目录不存在时列表为空、详情返回 404。可用 `PORT` 和下方环境变量调整配置。通过反向代理访问时，请在代理侧配置访问控制。
+
+Trace ID 优先来自对应的 `.storage.json` 报告，否则通过 OpenSearch 中精确匹配 `run_id` 的日志查找。缺少关联数据时 Trace 返回空；不会按时间猜测。PSOP 按 workflow ID 从 Demo 的 scenario 文件查找，找不到时返回 `null` 并标记 `partial`。
+
+指标使用报告中的服务名和运行时间窗口查询 Prometheus。指标通常是服务级累计序列，可能包含同一服务的其他运行，不能视为单次运行的精确值；响应的 `collection.scope` 标为 `service`，指标响应标记为 `partial`。日志和 Trace 也依赖 Demo 已上报对应的关联字段。
+
+列表、详情和 `/healthz` 会检查各数据源连通性。日志、Trace、指标接口在对应数据源不可用时返回 `partial` 和 `sourceStatus`。HTTPS 使用系统证书验证；使用私有 CA 时需要将 CA 加入运行环境的信任库。
 
 ## 代码结构
 
@@ -62,7 +68,7 @@ pyproject.toml                包定义、入口命令（uv / pip 通用）
 observability_query_service/  Python 包
   server.py                   HTTP 路由和请求响应处理
   service.py                  查询编排、过滤、分页和排序
-  repository.py               数据文件读取与 Workflow 查找
+  repository.py               运行报告读取及三类存储查询
   models/                     响应模型
     workflow.py               Workflow 摘要、详情、PSOP 和聚合
     trace.py                  OTLP ExportTraceServiceRequest
@@ -80,6 +86,7 @@ OBS_JAEGER_URL=http://jaeger-query:16686
 OBS_OPENSEARCH_URL=https://opensearch:9200
 OBS_OPENSEARCH_INDEX=a2at-logs-v2
 OBS_QUERY_TIMEOUT_MS=5000
+OBS_ARTIFACT_DIR=../complaint-observability-demo/artifacts
 ```
 
-实现时按以下顺序推进：先完成 Jaeger 任务列表与详情适配，再加入 OpenSearch 日志关联和 Prometheus 指标聚合，最后让 Portal 的 `__OPENAN_OBS_DATA_URL__` 改为本服务地址并增加登录态转发。
+默认地址为本机 Demo 的端口：Prometheus `19090`、Jaeger `16686`、OpenSearch `19200`。当前实现面向本地 Demo，无内置存储认证配置；需认证的数据源可通过受控的本地代理接入。Trace 的 include 选项、日志的 category、时间偏移和 cursor，以及指标的 dim 和 includeCharts 尚未实现；日志最多返回前 200 条。

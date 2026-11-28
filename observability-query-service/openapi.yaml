@@ -214,7 +214,10 @@ components:
         - type: object
           required: [psop, partial, sourceStatus]
           properties:
-            psop: { $ref: '#/components/schemas/Psop' }
+            psop:
+              nullable: true
+              allOf:
+                - $ref: '#/components/schemas/Psop'
             partial: { type: boolean }
             sourceStatus: { $ref: '#/components/schemas/SourceStatus' }
     TraceQuery:
@@ -338,7 +341,7 @@ components:
         dim: { type: string, enum: [workflow, agent, message] }
         metric: { type: string }
         windowMin: { type: integer, default: 120 }
-        step: { type: integer, default: 15 }
+        step: { type: integer, default: 15, description: Prometheus query step in seconds }
         includeCharts: { type: boolean, default: true }
     MetricResponse:
       type: object

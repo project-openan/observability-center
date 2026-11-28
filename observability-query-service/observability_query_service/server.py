@@ -28,7 +28,6 @@ from .service import WorkflowQueryService
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("PORT", "8787"))
-DATA_FILE = "dist-plugin/mock-collab-tasks.json"
 
 
 def create_handler(service):
@@ -108,7 +107,7 @@ def create_handler(service):
 
 
 def main():
-    repository = WorkflowRepository.from_workspace_file(DATA_FILE)
+    repository = WorkflowRepository.from_environment()
     query_service = WorkflowQueryService(repository)
     server = ThreadingHTTPServer((HOST, PORT), create_handler(query_service))
     print(f"Observability query service listening on http://{HOST}:{PORT}")

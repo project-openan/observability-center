@@ -17,26 +17,19 @@
 
 """Application service for workflow observability queries."""
 
-from .models.log import LogModel
-from .models.metric import MetricModel
-from .models.trace import TraceModel
-from .models.workflow import WorkflowModel
+from .repository import SourceUnavailable
 
 
 class WorkflowQueryService:
     def __init__(self, repository):
         self.repository = repository
-        self.workflow_model = WorkflowModel()
-        self.trace_model = TraceModel()
-        self.log_model = LogModel()
-        self.metric_model = MetricModel()
-
     def health(self):
-        statuses = {"trace": "ready", "metric": "ready", "log": "ready"}
-        return {"status": "ready", "sources": WorkflowModel.source_status(statuses)}
+        statuses = self.repository.health()
+        return {"status": "ready" if all(value == "ready" for value in statuses.values()) else "degraded",
+                "sources": self.source_status(statuses)}
 
     def list_workflows(self, query):
-        tasks = self.repository.tasks
+        tasks = self.repository.tasks()
         if query.get("from"):
             tasks = [task for task in tasks if task["startedAt"] >= query["from"]]
         if query.get("to"):
@@ -44,31 +37,37 @@ class WorkflowQueryService:
         if query.get("status") and query["status"] != "all":
             tasks = [task for task in tasks if task["status"] == query["status"]]
         if query.get("workflowType"):
-            tasks = [task for task in tasks if self.workflow_model.type(task) == query["workflowType"]]
+            tasks = [task for task in tasks if task["workflowType"] == query["workflowType"]]
         if query.get("keyword"):
             keyword = query["keyword"].lower()
             tasks = [
                 task
                 for task in tasks
-                if any(keyword in str(value).lower() for value in self.workflow_model.summary(task).values())
+                if keyword in str(task).lower()
             ]
 
         tasks = self.sort_workflows(tasks, query)
         limit = min(max(int(query.get("limit", 20)), 1), 100)
+        aggregates = self.aggregates(tasks)
+        facets = self.workflow_type_facets(tasks)
+        cursor = query.get("cursor")
+        if cursor:
+            position = next((index for index, task in enumerate(tasks) if task["runId"] == cursor), None)
+            tasks = tasks[position + 1:] if position is not None else []
         page = tasks[:limit]
-        statuses = {"trace": "ready", "metric": "ready", "log": "ready"}
+        statuses = self.repository.health()
         return {
-            "items": [self.workflow_model.summary(task) for task in page],
+            "items": [self.summary(task) for task in page],
             "nextCursor": None if len(tasks) <= limit else page[-1]["runId"],
-            "aggregates": self.workflow_model.aggregates(tasks),
-            "facets": {"workflowTypes": self.workflow_model.workflow_type_facets(tasks)},
+            "aggregates": aggregates,
+            "facets": {"workflowTypes": facets},
             "meta": {
-                "dataset": "observability-workflows",
-                "source": "mock-adapter",
-                "generatedAt": self.repository.generated_at(),
+                "dataset": "demo-runtime-reports",
+                "source": "demo-runtime",
+                "generatedAt": None,
             },
-            "partial": False,
-            "sourceStatus": WorkflowModel.source_status(statuses),
+            "partial": any(status != "ready" for status in statuses.values()),
+            "sourceStatus": self.source_status(statuses),
         }
 
     def sort_workflows(self, tasks, query):
@@ -80,23 +79,55 @@ class WorkflowQueryService:
 
     def get_workflow(self, run_id):
         task = self.repository.find(run_id)
-        return None if task is None else self.workflow_model.detail(task)
+        if task is None:
+            return None
+        statuses = self.repository.health()
+        return {**self.summary(task), "psop": self.psop(task), "partial": not task.get("psop") or any(status != "ready" for status in statuses.values()),
+                "sourceStatus": self.source_status(statuses)}
 
     def get_trace(self, run_id, query):
-        task = self.repository.find(run_id)
-        return None if task is None else self.trace_model.from_task(task, query)
+        return self.signal(run_id, query, self.repository.trace, "trace")
 
     def get_logs(self, run_id, query):
-        task = self.repository.find(run_id)
-        return None if task is None else self.log_model.from_task(task, query)
+        return self.signal(run_id, query, self.repository.logs, "log")
 
     def get_metrics(self, run_id, query):
+        return self.signal(run_id, query, self.repository.metrics, "metric")
+
+    def signal(self, run_id, query, method, source):
         task = self.repository.find(run_id)
         if task is None:
             return None
-        return self.metric_model.from_task(
-            task,
-            query,
-            self.repository.collection(),
-            self.repository.charts(),
-        )
+        try:
+            return method(task, query)
+        except SourceUnavailable as error:
+            return {"partial": True, "sourceStatus": self.source_status({source: "unavailable"}),
+                    "error": {"code": "SOURCE_UNAVAILABLE", "message": str(error)}}
+
+    @staticmethod
+    def source_status(statuses):
+        return {source: {"status": status} for source, status in statuses.items()}
+
+    @staticmethod
+    def summary(task):
+        return {key: task[key] for key in ("runId", "workflowId", "workflowType", "name", "status", "startedAt", "durationMs", "spanCount", "traceId")}
+
+    @staticmethod
+    def psop(task):
+        # A missing scenario must not be presented as the original PSOP.
+        return task.get("psop")
+
+    @staticmethod
+    def aggregates(tasks):
+        total = len(tasks)
+        success = sum(task["status"] == "success" for task in tasks)
+        return {"total": total, "success": success, "error": total - success,
+                "successRate": success / total if total else 0,
+                "avgDurationMs": round(sum(task["durationMs"] for task in tasks) / total) if total else 0}
+
+    @staticmethod
+    def workflow_type_facets(tasks):
+        facets = {}
+        for task in tasks:
+            facets[task["workflowType"]] = facets.get(task["workflowType"], 0) + 1
+        return [{"value": value, "count": count} for value, count in facets.items()]
